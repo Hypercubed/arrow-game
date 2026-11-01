@@ -188,25 +188,55 @@ const ArrowGame = () => {
     return newArrows;
   };
 
+  // Guaranteed solvable by reverse construction, then mutated for variety.
+  // Cells are placed centre-first; each arrow points in a direction that
+  // strictly increases its Chebyshev distance from the grid centre, so its
+  // ray contains only not-yet-placed cells and it is unblocked when placed.
+  // Forward play is placement order reversed: outside-in. The old
+  // edge-outward version was NOT guaranteed: its random interior arrows
+  // could face each other and deadlock (e.g. level 16, row 1).
+  // Mutation (fallback only): random direction changes, kept only while
+  // the board stays solvable, break the perfect outside-in layering.
   const createGuaranteedSolvable = (count, gridSize) => {
-    const newArrows = [];
+    const center = (gridSize - 1) / 2;
+    const cells = [];
     let id = 0;
-    
     for (let row = 0; row < gridSize && id < count; row++) {
       for (let col = 0; col < gridSize && id < count; col++) {
-        let direction;
-        if (row === 0) direction = 'up';
-        else if (row === gridSize - 1) direction = 'down';
-        else if (col === 0) direction = 'left';
-        else if (col === gridSize - 1) direction = 'right';
-        else direction = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
-        
-        newArrows.push({ id, row, col, direction });
+        cells.push({
+          id,
+          row,
+          col,
+          dist: Math.max(Math.abs(row - center), Math.abs(col - center)),
+          key: Math.random(),
+        });
         id++;
       }
     }
-    
-    return newArrows;
+    cells.sort((a, b) => (a.dist !== b.dist ? a.dist - b.dist : a.key - b.key));
+    const newArrows = cells.map((cell) => {
+      const dr = cell.row - center;
+      const dc = cell.col - center;
+      const allowed = [];
+      if (dr < 0 && Math.abs(dr) >= Math.abs(dc)) allowed.push('up');
+      if (dr > 0 && Math.abs(dr) >= Math.abs(dc)) allowed.push('down');
+      if (dc < 0 && Math.abs(dc) >= Math.abs(dr)) allowed.push('left');
+      if (dc > 0 && Math.abs(dc) >= Math.abs(dr)) allowed.push('right');
+      const choices = allowed.length === 0 ? DIRECTIONS : allowed;
+      return { id: cell.id, row: cell.row, col: cell.col, direction: choices[Math.floor(Math.random() * choices.length)] };
+    });
+    const mutAttempts = Math.min(count * 20, 1000);
+    for (let m = 0; m < mutAttempts; m++) {
+      const idx = Math.floor(Math.random() * newArrows.length);
+      const oldDirection = newArrows[idx].direction;
+      const newDirection = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
+      if (newDirection === oldDirection) continue;
+      newArrows[idx].direction = newDirection;
+      if (!isSolvable(newArrows)) newArrows[idx].direction = oldDirection;
+    }
+    // Restore the original row-major order (mutation/centre-out ordering
+    // is internal; callers and rendering expect id order).
+    return newArrows.sort((a, b) => a.id - b.id);
   };
 
   const isSolvable = (arrowsList) => {
